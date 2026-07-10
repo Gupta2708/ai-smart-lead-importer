@@ -11,10 +11,9 @@ Upload → preview locally → confirm → AI-assisted import → review, then e
 - [Features](#features)
 - [Tech stack](#tech-stack)
 - [How it works](#how-it-works-two-layer-extraction)
-- [Screenshots](#screenshots)
+- [System design](#system-design)
 - [Getting started](#getting-started)
 - [Environment variables](#environment-variables)
-- [API](#api)
 - [Verifying it works](#verifying-it-works)
 - [Deployment](#deployment)
 - [Engineering decisions](#engineering-decisions)
@@ -68,13 +67,46 @@ This ordering prevents two subtle bugs: **owner-email theft** (an agent's addres
 
 ---
 
-## Screenshots
+## System design
 
-> Add images to `docs/screenshots/` and reference them here.
+End-to-end flow. Nothing leaves the browser until the user confirms; on the server, the deterministic layer brackets the AI on both sides — gating contactless rows before the call and normalizing/owner-excluding after it.
 
-| Upload | Preview | Results |
-|--------|---------|---------|
-| _`docs/screenshots/upload.png`_ | _`docs/screenshots/preview.png`_ | _`docs/screenshots/results.png`_ |
+```mermaid
+flowchart TD
+    A[User selects CSV] --> B[Local parse & preview<br/>PapaParse · first 100 rows]
+    B --> C{Confirm & Process?}
+    C -- No --> B
+    C -- Yes --> D[POST /api/import<br/>multipart file]
+
+    subgraph API["Express API (stateless)"]
+        D --> E[Validate file<br/>type · size · non-empty]
+        E --> F[Parse CSV<br/>drop empty rows · tag source_row_number]
+        F --> G{Contact signal?<br/>email or valid mobile}
+        G -- No --> S1[Skip: Missing email and mobile number]
+        G -- Yes --> H[Batch rows<br/>size 12 · concurrency 2]
+        H --> I[AI semantic pass<br/>per batch · retries + repair]
+        I -- batch fails --> S2[Skip: AI batch failed after retries]
+        I --> J[Reconcile by source_row_number<br/>dedupe · preserve order]
+        J --> K[Owner-aware re-extraction<br/>exclude owner email/phone]
+        K --> L{Lead contact remains?}
+        L -- No --> S3[Skip: Contact info belongs to lead owner only]
+        L -- Yes --> M[Normalize<br/>date · phone · status · data_source]
+        M --> N[Assemble crm_note once<br/>CSV-safe]
+    end
+
+    N --> O[Response<br/>summary · records · skippedRecords · warnings]
+    S1 --> O
+    S2 --> O
+    S3 --> O
+    O --> P[Results UI<br/>metrics · tabs · CSV/JSON exports]
+```
+
+**Layer ownership at a glance**
+
+| Concern | Owner |
+|---|---|
+| Contactability gate, date/phone/email normalization, country code, status & data-source enums, `crm_note` assembly, all skip decisions | Deterministic (Layer 1) |
+| Name, company, location, lead owner, owner-contact hints, raw status/notes/source, possession time, description | AI (Layer 2) |
 
 ---
 
@@ -126,35 +158,9 @@ Copy `.env.example` and fill in a provider key. Keep this table and `.env.exampl
 
 ## API
 
-### `POST /api/import`
+`POST /api/import` — multipart upload, field `file` (`.csv`, 5 MB default). `GET /health` — service status.
 
-Multipart upload; field name `file` (`.csv`, 5 MB default).
-
-**Response**
-
-```json
-{
-  "summary": {
-    "totalRows": 26,
-    "imported": 24,
-    "skipped": 2,
-    "batchesProcessed": 3
-  },
-  "records": [ /* exactly 15 GrowEasy CRM fields each */ ],
-  "skippedRecords": [
-    { "rowNumber": 25, "reason": "Missing email and mobile number", "original": { } }
-  ],
-  "warnings": []
-}
-```
-
-Every record contains exactly the 15 CRM fields: `created_at, name, email, country_code, mobile_without_country_code, company, city, state, country, lead_owner, crm_status, crm_note, data_source, possession_time, description`.
-
-`summary.totalRows` excludes the header and is asserted to equal `imported + skipped`. `crm_status` is one of `GOOD_LEAD_FOLLOW_UP | DID_NOT_CONNECT | BAD_LEAD | SALE_DONE`; `data_source` is one of the five allowed projects or `""`.
-
-### `GET /health`
-
-Returns service status without exposing secrets.
+Returns `{ summary, records, skippedRecords, warnings }`. Every record has exactly the 15 CRM fields (`created_at, name, email, country_code, mobile_without_country_code, company, city, state, country, lead_owner, crm_status, crm_note, data_source, possession_time, description`). `crm_status` ∈ `{GOOD_LEAD_FOLLOW_UP, DID_NOT_CONNECT, BAD_LEAD, SALE_DONE}`; `data_source` is one of the five allowed projects or `""`. `summary.totalRows` excludes the header and is asserted to equal `imported + skipped`; each `skippedRecords` entry carries `rowNumber`, a non-empty `reason`, and its `original` data.
 
 ---
 
