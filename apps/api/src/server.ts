@@ -11,10 +11,13 @@ import { numberedRows, processRows } from "./import-service.js";
 // Resolve from this source file so pnpm filters, terminals, and Docker all load the same root .env.
 dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
 const app = express(); const maxBytes = Number(process.env.MAX_UPLOAD_MB ?? 5) * 1024 * 1024;
-const configuredOrigin = process.env.FRONTEND_URL ?? "http://localhost:3000";
+const normalizeOrigin = (value: string) => value.trim().replace(/\/+$/, "");
+const configuredOrigins = (process.env.FRONTEND_URL ?? "http://localhost:3000").split(",").map(normalizeOrigin).filter(Boolean);
 app.use(cors({ origin: (origin, callback) => {
   // Next may select 3001/3002 when a local port is occupied; allow that local-only variation.
-  if (!origin || origin === configuredOrigin || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) return callback(null, true);
+  const requestedOrigin = origin ? normalizeOrigin(origin) : "";
+  if (!origin || configuredOrigins.includes(requestedOrigin) || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(requestedOrigin)) return callback(null, true);
+  console.warn(`Rejected CORS origin: ${origin}. Allowed origins: ${configuredOrigins.join(", ")}`);
   return callback(new Error(`Origin ${origin} is not allowed. Set FRONTEND_URL to this deployed web origin.`));
 } }));
 app.use(rateLimit({ windowMs: 60_000, limit: Number(process.env.RATE_LIMIT_PER_IP_PER_MIN ?? 5), standardHeaders: "draft-7", legacyHeaders: false }));
