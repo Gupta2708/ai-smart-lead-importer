@@ -1,0 +1,12 @@
+{
+  "name": "groweasy-ai-csv-importer",
+  "private": true,
+  "packageManager": "pnpm@11.5.2",
+  "scripts": {
+    "dev": "corepack pnpm --parallel --filter @groweasy/api --filter @groweasy/web dev",
+    "build": "corepack pnpm --filter @groweasy/shared build && corepack pnpm --filter @groweasy/api build && corepack pnpm --filter @groweasy/web build",
+    "test": "corepack pnpm --filter @groweasy/shared build && corepack pnpm --filter @groweasy/shared test && corepack pnpm --filter @groweasy/api test",
+    "typecheck": "corepack pnpm --filter @groweasy/shared build && corepack pnpm --filter @groweasy/shared typecheck && corepack pnpm --filter @groweasy/api typecheck && corepack pnpm --filter @groweasy/web typecheck"
+  },
+  "devDependencies": { "typescript": "^5.7.3" }
+}

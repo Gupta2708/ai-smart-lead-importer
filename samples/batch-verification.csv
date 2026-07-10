@@ -1,0 +1,27 @@
+Lead Date,Full Name,Email,Mobile,Status,Campaign,Remarks,Assigned To
+29-06-2026 09:00,Aarav Mehta,aarav.mehta@example.com,9876543210,Interested,Meridian Tower Phase 2,Requests a weekday callback,anita@groweasy.in
+29-06-2026 09:10,Diya Kapoor,diya.kapoor@example.com,9876543211,Not Dialed,Eden Park Enquiry,Call after 5pm,anita@groweasy.in
+29-06-2026 09:20,Rohan Shah,rohan.shah@example.com,9876543212,Closed Won,Facebook Lead Ads,Booked a site visit,anita@groweasy.in
+29-06-2026 09:30,Meera Nair,meera.nair@example.com,9876543213,Not Interested,Varah Swamy Layout,Looking outside Bengaluru,anita@groweasy.in
+29-06-2026 09:40,Arjun Rao,arjun.rao@example.com,9876543214,Callback,Sarjapur Plot Leads,Needs plot pricing,anita@groweasy.in
+29-06-2026 09:50,Kavya Iyer,kavya.iyer@example.com,9876543215,Busy,Leads on Demand,Asked to call tomorrow,anita@groweasy.in
+29-06-2026 10:00,Vikram Das,vikram.das@example.com,9876543216,Qualified,Meridian Tower Phase 2,Interested in a 2BHK,anita@groweasy.in
+29-06-2026 10:10,Sana Ali,sana.ali@example.com,9876543217,No Answer,Google Ads,Sent WhatsApp follow-up,anita@groweasy.in
+29-06-2026 10:20,Neil Joseph,neil.joseph@example.com,9876543218,Good Lead,Eden Park Enquiry,Needs brochure,anita@groweasy.in
+29-06-2026 10:30,Isha Bansal,isha.bansal@example.com,9876543219,Invalid,Website Lead,Invalid contact note,anita@groweasy.in
+29-06-2026 10:40,Dev Malhotra,dev.malhotra@example.com,9876543220,Reschedule Demo,Meridian Tower Phase 2,Reschedule for Saturday,anita@groweasy.in
+29-06-2026 10:50,Riya Sen,riya.sen@example.com,9876543221,Converted,Sarjapur Plot Leads,Token paid,anita@groweasy.in
+30-06-2026 09:00,Aditya Jain,aditya.jain@example.com,9876543222,Follow Up,Leads on Demand,Share floor plan,rahul@groweasy.in
+30-06-2026 09:10,Pooja Verma,pooja.verma@example.com,9876543223,Unreachable,Facebook Lead Ads,Try another time,rahul@groweasy.in
+30-06-2026 09:20,Manav Gupta,manav.gupta@example.com,9876543224,Interested,Eden Park Enquiry,Looking to move this year,rahul@groweasy.in
+30-06-2026 09:30,Tanya Bose,tanya.bose@example.com,9876543225,Wrong Number,Google Ads,Number invalid,rahul@groweasy.in
+30-06-2026 09:40,Kunal Roy,kunal.roy@example.com,9876543226,Booked,Meridian Tower Phase 2,Visit scheduled,rahul@groweasy.in
+30-06-2026 09:50,Neha Sethi,neha.sethi@example.com,9876543227,Call Later,Varah Swamy Layout,Call Sunday afternoon,rahul@groweasy.in
+30-06-2026 10:00,Harsh Patel,harsh.patel@example.com,9876543228,Warm,Sarjapur Plot Leads,Comparing projects,rahul@groweasy.in
+30-06-2026 10:10,Anika Paul,anika.paul@example.com,9876543229,Junk,Instagram,Spam form,rahul@groweasy.in
+30-06-2026 10:20,Sameer Khan,sameer.khan@example.com,9876543230,Demo Reschedule,Leads on Demand,Out of town,rahul@groweasy.in
+30-06-2026 10:30,Leena Dsouza,leena.dsouza@example.com,9876543231,Sale Done,Eden Park Enquiry,Agreement signed,rahul@groweasy.in
+30-06-2026 10:40,Owner Contact Only,owneronly@groweasy.in,,Interested,Meridian Tower Phase 2,Owner-only contact should skip,owneronly@groweasy.in
+30-06-2026 10:50,No Contact,,,Not Dialed,Facebook Lead Ads,Pre-AI missing contact skip,rahul@groweasy.in
+30-06-2026 11:00,Extra Contacts,"extra.primary@example.com, extra.alt@example.com","9876543232, 9876543233",Interested,Meridian Tower Phase 2,Verify extras appear once,rahul@groweasy.in
+30-06-2026 11:10,Last Batch,last.batch@example.com,9876543234,Not Connected,Leads on Demand,For third batch,rahul@groweasy.in
