@@ -3,7 +3,7 @@ services:
     name: groweasy-csv-importer-api
     runtime: node
     rootDir: .
-    buildCommand: corepack pnpm install --frozen-lockfile=false && corepack pnpm --filter @groweasy/api build
+    buildCommand: corepack pnpm install --frozen-lockfile=false && corepack pnpm --filter @groweasy/shared build && corepack pnpm --filter @groweasy/api build
     startCommand: corepack pnpm --filter @groweasy/api start
     envVars:
       - key: AI_PROVIDER
@@ -12,3 +12,5 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
