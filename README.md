@@ -1,47 +1,227 @@
 # GrowEasy AI CSV Importer
 
-An AI-assisted, stateless CSV importer that turns arbitrary lead exports into validated GrowEasy CRM records. The web app previews CSV data locally before sending it to the API for semantic mapping.
+Turn any messy lead export — Facebook Lead Ads, Google Ads, real-estate CRM dumps, agency sheets, hand-made spreadsheets — into clean, validated GrowEasy CRM records. Columns don't have to match a fixed schema: an LLM handles the semantic mapping, and a deterministic layer handles everything mechanical and safety-critical.
 
-## Highlights
+Upload → preview locally → confirm → AI-assisted import → review, then export CRM CSV / JSON / skipped rows.
 
-- Next.js + Tailwind web app with drag/drop, local preview, progress feedback, exports, results tabs, and responsive sticky tables.
-- Express API with CSV upload limits, IP rate limiting, bounded AI batch concurrency, retries, response repair, and per-row skip reasons.
-- OpenAI and Gemini provider adapters; Gemini is the default for the public demo.
-- Shared Zod contracts and Vitest coverage for CRM-safe normalization.
+---
 
-## Architecture
+## Table of contents
 
-The importer intentionally separates semantic work from mechanical work. The AI receives only contactable candidate rows and identifies meaning (name, owner, location, notes, source, status, and which owner contact must be excluded). It never creates final CRM records, splits contacts, formats dates, builds notes, or skips a row.
+- [Features](#features)
+- [Tech stack](#tech-stack)
+- [How it works](#how-it-works-two-layer-extraction)
+- [System design](#system-design)
+- [Getting started](#getting-started)
+- [Environment variables](#environment-variables)
+- [Verifying it works](#verifying-it-works)
+- [Deployment](#deployment)
+- [Engineering decisions](#engineering-decisions)
+- [Limitations & next steps](#limitations--next-steps)
+- [Project structure](#project-structure)
 
-The deterministic layer pre-scans every row for any contact signal. Rows with neither an email nor a valid mobile are skipped as `Missing email and mobile number` before AI. After AI returns owner hints, it re-extracts contacts while excluding the owner values/column. If no lead contact remains it skips with `Contact info belongs to lead owner only`. This ordering prevents owner-email theft and premature contactability decisions.
+---
 
-There is one date pipeline: the backend takes an unmodified original CSV cell, using `created_at_raw` only to select among cells, then normalizes it. Ambiguous slash dates default to DD/MM/YYYY for the Indian CRM context. Bare valid ten-digit Indian mobiles get `+91`; an explicit valid country-code column always wins.
+## Features
 
-## Run locally
+- **Arbitrary CSV in, GrowEasy CRM out.** No fixed headers; the AI maps meaning, not column positions.
+- **Local preview before any upload.** The browser parses and previews the file (PapaParse); nothing is sent until you click **Confirm & Process with AI**.
+- **Resilient batching.** Bounded-concurrency AI batches with retries and response repair. A single failed batch never aborts the whole import — its rows are skipped with a reason.
+- **Deterministic guardrails.** Dates, emails, phones, country codes, status/data-source enums, and note assembly are all handled in code, not left to the model.
+- **Honest skip reasons.** Every skipped row carries a specific, non-empty reason and its original data.
+- **Provider-agnostic.** OpenAI and Gemini adapters ship today (Claude is a drop-in next); Gemini is the default for the public demo.
+- **Polished UX.** Drag/drop, sticky-header scrollable tables, summary metric cards, results/skipped/warnings tabs, dark mode, toasts, and CSV/JSON exports.
+
+## Tech stack
+
+| Layer    | Choices                                                        |
+|----------|---------------------------------------------------------------|
+| Frontend | Next.js, TypeScript, Tailwind CSS, PapaParse                  |
+| Backend  | Node.js, Express, TypeScript, Multer (memory), p-limit        |
+| Shared   | TypeScript types, constants, Zod schemas, normalization utils |
+| AI       | OpenAI + Gemini adapters (provider abstraction)               |
+| Tooling  | pnpm workspaces, Vitest, Docker Compose                       |
+
+Stateless by design — no database, no auth.
+
+---
+
+## How it works (two-layer extraction)
+
+The importer deliberately separates **semantic** work from **mechanical** work. This is the core design decision and the reason the output is reliable.
+
+**Layer 2 — AI (semantic only).** The model receives candidate rows and identifies *meaning*: name, company, city/state/country, lead owner, raw status text, remarks, raw source, possession time, description — plus hints for which contact values belong to the **owner** so they can be excluded from the lead. The AI never builds final records, never splits or reformats contacts, never formats dates, never assembles notes, and never decides skips.
+
+**Layer 1 — deterministic (mechanical + safety).** The backend owns everything that must be correct every time:
+
+1. **Pre-scan gate.** Every row is scanned for any contact signal. Rows with neither an email nor a valid mobile are skipped *before* the AI runs, with reason `Missing email and mobile number`.
+2. **AI pass** on the surviving rows, in batches.
+3. **Owner-aware re-extraction.** Using the AI's owner hints, contacts are re-extracted while excluding the owner's email/phone and column. If nothing lead-side remains, the row is skipped with reason `Contact info belongs to lead owner only`.
+4. **Normalization.** Dates, phones, country codes, status, and data-source are normalized; the final `crm_note` is assembled exactly once.
+
+This ordering prevents two subtle bugs: **owner-email theft** (an agent's address being imported as the lead's email) and **premature contactability decisions** (skipping before we know which contact belongs to whom).
+
+**One date pipeline.** `normalizeDate` always receives the *original* CSV cell text — `created_at_raw` from the AI is only used to pick which cell is the date, never to reformat it.
+
+**Documented assumptions.** Ambiguous slash dates (e.g. `06/07/2026`) default to **DD/MM/YYYY** for the Indian CRM context. Bare valid ten-digit Indian mobiles are assigned **`+91`**; an explicit, valid country-code column always wins over the default.
+
+---
+
+## System design
+
+End-to-end flow. Nothing leaves the browser until the user confirms; on the server, the deterministic layer brackets the AI on both sides — gating contactless rows before the call and normalizing/owner-excluding after it.
+
+```mermaid
+flowchart TD
+    A[User selects CSV] --> B[Local parse & preview<br/>PapaParse · first 100 rows]
+    B --> C{Confirm & Process?}
+    C -- No --> B
+    C -- Yes --> D[POST /api/import<br/>multipart file]
+
+    subgraph API["Express API (stateless)"]
+        D --> E[Validate file<br/>type · size · non-empty]
+        E --> F[Parse CSV<br/>drop empty rows · tag source_row_number]
+        F --> G{Contact signal?<br/>email or valid mobile}
+        G -- No --> S1[Skip: Missing email and mobile number]
+        G -- Yes --> H[Batch rows<br/>size 12 · concurrency 2]
+        H --> I[AI semantic pass<br/>per batch · retries + repair]
+        I -- batch fails --> S2[Skip: AI batch failed after retries]
+        I --> J[Reconcile by source_row_number<br/>dedupe · preserve order]
+        J --> K[Owner-aware re-extraction<br/>exclude owner email/phone]
+        K --> L{Lead contact remains?}
+        L -- No --> S3[Skip: Contact info belongs to lead owner only]
+        L -- Yes --> M[Normalize<br/>date · phone · status · data_source]
+        M --> N[Assemble crm_note once<br/>CSV-safe]
+    end
+
+    N --> O[Response<br/>summary · records · skippedRecords · warnings]
+    S1 --> O
+    S2 --> O
+    S3 --> O
+    O --> P[Results UI<br/>metrics · tabs · CSV/JSON exports]
+```
+
+**Layer ownership at a glance**
+
+| Concern | Owner |
+|---|---|
+| Contactability gate, date/phone/email normalization, country code, status & data-source enums, `crm_note` assembly, all skip decisions | Deterministic (Layer 1) |
+| Name, company, location, lead owner, owner-contact hints, raw status/notes/source, possession time, description | AI (Layer 2) |
+
+---
+
+## Getting started
 
 ```bash
 cp .env.example .env
-# set GEMINI_API_KEY (or set AI_PROVIDER=openai and OPENAI_API_KEY)
+# set GEMINI_API_KEY  (or set AI_PROVIDER=openai and OPENAI_API_KEY)
+
 corepack pnpm install
 corepack pnpm dev
 ```
 
-The web app runs on `http://localhost:3000`; API on `http://localhost:4000`. Use `corepack pnpm test`, `corepack pnpm typecheck`, and `corepack pnpm build` to verify the workspace.
+- Web: http://localhost:3000
+- API: http://localhost:4000
+
+Verify the workspace:
+
+```bash
+corepack pnpm typecheck
+corepack pnpm test
+corepack pnpm build
+```
+
+---
+
+## Environment variables
+
+Copy `.env.example` and fill in a provider key. Keep this table and `.env.example` in sync.
+
+| Variable                  | Purpose                                              | Example                    |
+|---------------------------|------------------------------------------------------|----------------------------|
+| `PORT`                    | API port                                             | `4000`                     |
+| `FRONTEND_URL`            | Allowed CORS origin (web app)                        | `http://localhost:3000`    |
+| `MAX_UPLOAD_MB`           | Upload size limit                                    | `5`                        |
+| `AI_PROVIDER`             | `gemini` or `openai`                                 | `gemini`                   |
+| `GEMINI_API_KEY`          | Gemini key (default provider for the demo)           | _your key_                 |
+| `GEMINI_MODEL`            | Gemini model (use one your key supports)             | `gemini-1.5-flash`         |
+| `OPENAI_API_KEY`          | OpenAI key (if `AI_PROVIDER=openai`)                 | _your key_                 |
+| `OPENAI_MODEL`            | OpenAI model                                         | `gpt-4o-mini`              |
+| `AI_BATCH_SIZE`           | Rows per AI batch                                    | `12`                       |
+| `AI_BATCH_CONCURRENCY`    | Parallel batches (bounded)                           | `2`                        |
+| `AI_MAX_RETRIES`          | Retries per failed batch                             | `2`                        |
+| `RATE_LIMIT_PER_IP_PER_MIN` | Per-IP request cap for the public demo             | `5`                        |
+
+> **Public demo note:** the hosted app defaults to the **Gemini free tier** with a per-IP rate limit so a reviewer's testing can't exhaust a paid key.
+
+---
 
 ## API
 
-`POST /api/import` accepts a multipart `file` CSV field (5MB default) and returns `{ summary, records, skippedRecords, warnings }`. Records always contain exactly the 15 GrowEasy CRM fields. `summary.totalRows` excludes the header and is checked against imported plus skipped rows.
+`POST /api/import` — multipart upload, field `file` (`.csv`, 5 MB default). `GET /health` — service status.
 
-## Verifying batches and edge cases
+Returns `{ summary, records, skippedRecords, warnings }`. Every record has exactly the 15 CRM fields (`created_at, name, email, country_code, mobile_without_country_code, company, city, state, country, lead_owner, crm_status, crm_note, data_source, possession_time, description`). `crm_status` ∈ `{GOOD_LEAD_FOLLOW_UP, DID_NOT_CONNECT, BAD_LEAD, SALE_DONE}`; `data_source` is one of the five allowed projects or `""`. `summary.totalRows` excludes the header and is asserted to equal `imported + skipped`; each `skippedRecords` entry carries `rowNumber`, a non-empty `reason`, and its `original` data.
 
-Start both apps with `corepack pnpm dev`, choose `samples/batch-verification.csv` in the browser, then click **Confirm & Process with AI**. With the default `AI_BATCH_SIZE=12`, the 26 data rows yield 25 contactable candidates and therefore **3 AI batches**; the pre-scan skips the no-contact row immediately and the owner-only row is skipped after AI owner exclusion. The result screen must show `totalRows: 26`, `batchesProcessed: 3`, and two skipped rows with those exact reasons. Change `AI_BATCH_SIZE=5`, restart the API, and repeat: the same file should now report 5 batches.
+---
 
-Run `corepack pnpm test` to verify normalization, owner-only skips, duplicate AI rows, order preservation, and count invariants. For retry/failure behavior, temporarily set an invalid `GEMINI_MODEL`, import the batch fixture, and confirm all contactable rows return `AI batch failed after retries`; restore `gemini-2.5-flash` afterwards.
+## Verifying it works
 
-## Samples and deployment
+**End-to-end + batching.** Run `corepack pnpm dev`, choose `samples/batch-verification.csv`, and click **Confirm & Process with AI**. With `AI_BATCH_SIZE=12`, the fixture produces **3 AI batches** and two skipped rows demonstrating *both* skip paths:
 
-`samples/` includes Facebook, real-estate, messy-sales, and GrowEasy-style fixtures covering ambiguous dates, extra contacts, pincodes, generic sources, missing contacts, and owner-only contacts. `docker-compose.yml` starts both apps. Deploy the API to Render using `render.yaml` (long-running batches are a poor fit for short serverless limits), deploy web to Vercel, set `NEXT_PUBLIC_API_URL` to the API, and set `FRONTEND_URL` to the Vercel origin.
+- a truly contactless row (no email, no mobile, no owner email) → `Missing email and mobile number` (skipped pre-AI)
+- a row whose only contact is the owner's → `Contact info belongs to lead owner only` (skipped post-AI)
 
-## Limitations and next steps
+The result screen should show `totalRows: 26`, `imported + skipped == 26`, and `batchesProcessed: 3`. Set `AI_BATCH_SIZE=5`, restart the API, and re-run to confirm the batch count scales.
 
-AI mapping requires a configured provider key; imports fail clearly without one. The current endpoint returns a single final response rather than SSE progress. Future work: SSE progress, Claude adapter, larger-file queueing, audit storage, and screenshot documentation.
+**Date guarantee.** Every `created_at` must be `new Date()`-parseable:
+
+```bash
+curl -s -F "file=@samples/real-estate-leads.csv" http://localhost:4000/api/import \
+| jq -r '.records[].created_at' \
+| while read d; do node -e "process.exit(isNaN(new Date('$d'))?1:0)" || echo "BAD: $d"; done
+```
+
+**Unit tests.** `corepack pnpm test` covers date normalization (incl. ambiguous DD/MM), email extraction with owner exclusion, phone extraction (bare → `+91`, pincodes/years/order-ids rejected), status and data-source mapping, contactless + owner-only skips, row reconciliation (duplicates, missing rows, order preserved after concurrency), Zod schema validation, `crm_note` de-duplication, and the count invariants.
+
+**Failure handling.** Temporarily set an invalid `GEMINI_MODEL`, import the batch fixture, and confirm contactable rows return `AI batch failed after retries` rather than a 500; restore the model afterward.
+
+---
+
+## Deployment
+
+- **API → Render** (using `render.yaml`). A long-running, multi-batch import is a poor fit for short serverless timeouts, so the API runs as a standard web service.
+- **Web → Vercel.** Set `NEXT_PUBLIC_API_URL` to the Render API URL, and set the API's `FRONTEND_URL` to the Vercel origin so CORS is scoped correctly.
+- **Self-hosted alternative:** `docker-compose.yml` builds and runs both apps together.
+
+Default the deployed API to the Gemini free tier and keep `RATE_LIMIT_PER_IP_PER_MIN` set.
+
+---
+
+## Engineering decisions
+
+- **Two layers, not one.** Letting the LLM do mechanical work (splitting contacts, formatting dates, deciding skips) produced duplicated notes and mis-assigned emails in early iterations. Moving all of that into deterministic code made the output stable and testable.
+- **Owner-aware contact extraction, in a specific order.** Deciding contactability before knowing which email is the owner's caused two classes of bug; the pre-scan-gate → AI → owner-exclusion → re-check ordering fixes both.
+- **The AI never formats dates.** Models occasionally "helpfully" reformat or truncate dates; the deterministic pipeline takes the raw cell so `new Date(created_at)` is always valid.
+- **Documented, defensible defaults** for ambiguous dates (DD/MM) and bare mobiles (`+91`), rather than silent guesses.
+- **Skips are always explained.** Every skipped row has a specific reason and its original payload, so imports are auditable.
+
+## Limitations & next steps
+
+- AI mapping requires a configured provider key; without one, imports fail with a clear message rather than degrading silently.
+- The import endpoint returns a single final response; there is no streaming progress yet.
+- Next: SSE/incremental progress, a Claude adapter, queueing for very large files, optional audit storage, and committed screenshots.
+
+## Project structure
+
+```
+groweasy-ai-csv-importer/
+├─ apps/
+│  ├─ web/        # Next.js app: upload, preview, processing, results
+│  └─ api/        # Express API: parsing, AI batching, normalization
+├─ packages/
+│  └─ shared/     # Zod schemas, types, constants, normalizers
+├─ samples/       # messy CSV fixtures
+├─ docker-compose.yml
+├─ render.yaml
+└─ .env.example
+```
